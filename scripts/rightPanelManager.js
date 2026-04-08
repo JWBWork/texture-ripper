@@ -370,20 +370,20 @@ const RightPanelManager = {
             updateBackground: () => {
                 const width = parseInt(document.getElementById('rightWidth').value);
                 const height = parseInt(document.getElementById('rightHeight').value);
-                
+
                 if (stage.isTransparentBackground) {
                     const checkerboardPattern = CheckerboardManager.createCheckerboard(
-                        width, 
-                        height, 
+                        width,
+                        height,
                         CONFIG.CHECKERBOARD.CELL_SIZE
                     );
-                    
+
                     // Create a new image and wait for it to load
                     const checkerboardImg = new Image();
                     checkerboardImg.onload = () => {
                         // Remove old background
                         stage.bgRect.destroy();
-                        
+
                         // Create new checkerboard background
                         const newBgRect = new Konva.Image({
                             x: 0,
@@ -394,7 +394,7 @@ const RightPanelManager = {
                             listening: false,
                             name: 'bgRect'
                         });
-                        
+
                         stage.bgLayer.add(newBgRect);
                         stage.bgRect = newBgRect;
                         stage.bgLayer.draw();
@@ -407,6 +407,58 @@ const RightPanelManager = {
                     stage.bgRect.fill(CONFIG.BACKGROUND.FILL);
                     stage.bgLayer.draw();
                 }
+            },
+
+            getState: () => {
+                const textures = [];
+                Object.keys(tiedRects).forEach(groupId => {
+                    const t = tiedRects[groupId];
+                    textures.push({
+                        groupId,
+                        src: SaveManager.imageToDataURL(t),
+                        x: t.x(), y: t.y(),
+                        width: t.width(), height: t.height(),
+                        scaleX: t.scaleX(), scaleY: t.scaleY(),
+                        rotation: t.rotation(),
+                        offsetX: t.offsetX(), offsetY: t.offsetY()
+                    });
+                });
+                return { textures };
+            },
+
+            loadState: (data) => {
+                // Clear existing textures
+                Object.keys(tiedRects).forEach(id => {
+                    tiedRects[id].destroy();
+                    delete tiedRects[id];
+                });
+                tr.nodes([]);
+                imageLayer.destroyChildren();
+
+                // Recreate textures
+                data.textures.forEach(texData => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const konvaImg = new Konva.Image({
+                            x: texData.x, y: texData.y,
+                            image: img,
+                            width: texData.width, height: texData.height,
+                            scaleX: texData.scaleX, scaleY: texData.scaleY,
+                            rotation: texData.rotation,
+                            offsetX: texData.offsetX, offsetY: texData.offsetY,
+                            id: `rect_${texData.groupId}`,
+                            draggable: true
+                        });
+
+                        konvaImg.on('dragmove', snapping.handleDragging);
+                        konvaImg.on('dragend', snapping.handleDragEnd);
+
+                        imageLayer.add(konvaImg);
+                        tiedRects[texData.groupId] = konvaImg;
+                        imageLayer.batchDraw();
+                    };
+                    img.src = texData.src;
+                });
             }
         };
 

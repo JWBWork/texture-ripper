@@ -358,6 +358,182 @@ const LeftPanelManager = {
         PanZoomManager.initPanning(stage);
         PanZoomManager.initZooming(stage);
 
+        // Expose left panel API
+        window.leftPanel = {
+            getState: () => {
+                const images = bgImages.map(konvaImg => ({
+                    src: SaveManager.imageToDataURL(konvaImg),
+                    x: konvaImg.x(), y: konvaImg.y(),
+                    width: konvaImg.width(), height: konvaImg.height(),
+                    scaleX: konvaImg.scaleX(), scaleY: konvaImg.scaleY(),
+                    rotation: konvaImg.rotation()
+                }));
+
+                const polygons = [];
+                polygonLayer.find('.group').forEach(group => {
+                    polygons.push({
+                        id: group._id,
+                        groupX: group.x(), groupY: group.y(),
+                        vertices: group.vertices.map(v => ({ x: v.x, y: v.y })),
+                        midpoints: group.midpoints.map(m => ({ x: m.x, y: m.y, locked: m.locked }))
+                    });
+                });
+
+                return { images, polygons };
+            },
+
+            loadState: (data) => {
+                // Clear existing
+                bgImages.forEach(img => img.destroy());
+                bgImages.length = 0;
+                polygonLayer.find('.group').forEach(g => g.destroy());
+                dirtyPolygons.clear();
+                selectedGroup = null;
+                tr.nodes([]);
+
+                // Load images (async), then polygons once all images are loaded
+                let loaded = 0;
+                const totalImages = data.images.length;
+
+                function loadPolygons() {
+                    data.polygons.forEach(polyData => {
+                        const group = PolygonManager.createPolygonGroup(
+                            stage, polygonLayer, polyData.vertices, dirtyPolygons
+                        );
+
+                        // Fix ID mapping: remove auto-generated, set saved
+                        dirtyPolygons.delete(group._id);
+                        group._id = polyData.id;
+                        dirtyPolygons.add(group._id);
+
+                        // Restore group position
+                        group.x(polyData.groupX);
+                        group.y(polyData.groupY);
+
+                        // Restore midpoints (may have been moved from edge centers)
+                        polyData.midpoints.forEach((m, i) => {
+                            group.midpoints[i].x = m.x;
+                            group.midpoints[i].y = m.y;
+                            group.midpoints[i].locked = m.locked;
+                        });
+
+                        // Update midpoint visuals
+                        group.find('.midpoint').forEach((mp, i) => {
+                            mp.position({ x: group.midpoints[i].x, y: group.midpoints[i].y });
+                        });
+
+                        // Update reference points
+                        group.referencePoints.forEach((ref, i) => {
+                            const v1 = group.vertices[i];
+                            const v2 = group.vertices[(i + 1) % group.vertices.length];
+                            ref.position({ x: (v1.x + v2.x) / 2, y: (v1.y + v2.y) / 2 });
+                        });
+
+                        // Redraw with restored midpoints
+                        PolygonManager.drawCurvedPolygon(group, group.vertices, group.midpoints);
+                        GridManager.drawGrid(group, group.vertices, group.midpoints);
+                        const pts = PolygonManager.computeDragSurfacePoints(group.vertices, group.midpoints);
+                        PolygonManager.updateDragSurface(group, pts);
+                    });
+
+                    polygonLayer.batchDraw();
+                    bgLayer.batchDraw();
+                }
+
+                if (totalImages === 0) {
+                    loadPolygons();
+                    return;
+                }
+
+                data.images.forEach(imgData => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const konvaImg = new Konva.Image({
+                            x: imgData.x, y: imgData.y,
+                            image: img,
+                            width: imgData.width, height: imgData.height,
+                            scaleX: imgData.scaleX, scaleY: imgData.scaleY,
+                            rotation: imgData.rotation,
+                            draggable: !imagesLocked
+                        });
+                        bgLayer.add(konvaImg);
+                        bgImages.push(konvaImg);
+                        bgLayer.batchDraw();
+
+                        loaded++;
+                        if (loaded === totalImages) loadPolygons();
+                    };
+                    img.src = imgData.src;
+                });
+            },
+
+            autoPackImages: () => {
+                if (bgImages.length === 0) return;
+
+                const padding = 10;
+
+                const getDims = (img) => ({
+                    width: img.width() * Math.abs(img.scaleX()),
+                    height: img.height() * Math.abs(img.scaleY())
+                });
+
+                // Sort by height descending for better shelf packing
+                const sorted = [...bgImages].sort((a, b) => {
+                    return getDims(b).height - getDims(a).height;
+                });
+
+                // Determine a target row width based on total image area
+                // Aim for a roughly square layout
+                let totalArea = 0;
+                sorted.forEach(img => {
+                    const d = getDims(img);
+                    totalArea += d.width * d.height;
+                });
+                const targetRowWidth = Math.max(
+                    stage.width(),
+                    Math.sqrt(totalArea) * 1.4
+                );
+
+                // Shelf packing: place images left-to-right, wrap to new row
+                let cursorX = 0;
+                let cursorY = 0;
+                let rowHeight = 0;
+
+                sorted.forEach(img => {
+                    const { width, height } = getDims(img);
+
+                    // Wrap to next row if this image would exceed target width
+                    if (cursorX > 0 && cursorX + width > targetRowWidth) {
+                        cursorX = 0;
+                        cursorY += rowHeight + padding;
+                        rowHeight = 0;
+                    }
+
+                    img.position({ x: cursorX, y: cursorY });
+                    cursorX += width + padding;
+                    rowHeight = Math.max(rowHeight, height);
+                });
+
+                tr.nodes([]);
+
+                // Zoom-to-fit: scale and pan so all images are visible
+                const viewWidth = stage.width();
+                const viewHeight = stage.height();
+                const layoutWidth = targetRowWidth;
+                const layoutHeight = cursorY + rowHeight;
+                const scale = Math.min(
+                    viewWidth / (layoutWidth + padding * 2),
+                    viewHeight / (layoutHeight + padding * 2),
+                    1 // don't zoom in past 100%
+                );
+                stage.scale({ x: scale, y: scale });
+                stage.position({ x: padding * scale, y: padding * scale });
+
+                bgLayer.batchDraw();
+                FeedbackManager.show(`Arranged ${bgImages.length} image(s)`);
+            }
+        };
+
         return stage;
     }
 };

@@ -33,10 +33,17 @@ document.addEventListener('DOMContentLoaded', () => {
         stageRight.draw(); // Redraw the stage
     });
 
-    // Auto Pack button
+    // Auto Pack buttons
     document.getElementById('autoPack').addEventListener('click', () => {
         RightPanelManager.autoPackTextures(stageRight, false);
     });
+    document.getElementById('autoPackLeft').addEventListener('click', () => {
+        if (window.leftPanel) window.leftPanel.autoPackImages();
+    });
+
+    // Save/Load project functions (accessible from shortcuts and Electron menu)
+    window.saveProject = () => SaveManager.save(stageLeft, stageRight);
+    window.loadProject = () => SaveManager.load(stageLeft, stageRight);
 
     // Export button
     document.getElementById('exportRight').addEventListener('click', () => {
@@ -138,6 +145,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('requestFeature').addEventListener('click', () => {
         openExternalURL('https://github.com/raycastly/texture-ripper/issues/new?template=feature_request.yml');
     });
+
+    // Listen for Electron menu events (File > Save/Open)
+    if (isElectron()) {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.on('menu-save-project', () => window.saveProject());
+        ipcRenderer.on('menu-open-project', () => window.loadProject());
+    }
 });
 
 

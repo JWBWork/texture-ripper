@@ -48,32 +48,7 @@ const PolygonManager = {
             });
         }
 
-        // Create a more accurate drag surface that follows the curved edges
-        const createCurvedDragSurface = (vertices, midpoints) => {
-            const points = [];
-
-            for (let i = 0; i < vertices.length; i++) {
-                const nextIdx = (i + 1) % vertices.length;
-                const P0 = vertices[i];
-                const P2 = vertices[nextIdx];
-                const M  = midpoints[i]; // single control point
-
-                const numSamples = 10; // resolution
-                for (let j = 0; j <= numSamples; j++) {
-                    const t = j / numSamples;
-                    const mt = 1 - t;
-
-                    const x = mt*mt*P0.x + 2*mt*t*M.x + t*t*P2.x;
-                    const y = mt*mt*P0.y + 2*mt*t*M.y + t*t*P2.y;
-
-                    points.push(x, y);
-                }
-            }
-
-            return points;
-        };
-
-        const dragSurfacePoints = createCurvedDragSurface(vertices, midpoints);
+        const dragSurfacePoints = PolygonManager.computeDragSurfacePoints(vertices, midpoints);
         const dragSurface = new Konva.Line({
             points: dragSurfacePoints,
             closed: true,
@@ -171,7 +146,7 @@ const PolygonManager = {
                 });
                 
                 // Update drag surface with curved edges
-                const updatedPoints = createCurvedDragSurface(vertices, midpoints);
+                const updatedPoints = PolygonManager.computeDragSurfacePoints(vertices, midpoints);
                 PolygonManager.updateDragSurface(group, updatedPoints);
 
                 // Update reference circles
@@ -255,7 +230,7 @@ const PolygonManager = {
                 GridManager.drawGrid(group, vertices, midpoints);
                 
                 // Update drag surface with curved edges
-                const updatedPoints = createCurvedDragSurface(vertices, midpoints);
+                const updatedPoints = PolygonManager.computeDragSurfacePoints(vertices, midpoints);
                 PolygonManager.updateDragSurface(group, updatedPoints);
             });
             
@@ -323,6 +298,26 @@ const PolygonManager = {
         });
 
         group.add(polygon);
+    },
+
+    // Compute curved drag surface points (quadratic Bezier sampling)
+    computeDragSurfacePoints: (vertices, midpoints) => {
+        const points = [];
+        for (let i = 0; i < vertices.length; i++) {
+            const nextIdx = (i + 1) % vertices.length;
+            const P0 = vertices[i];
+            const P2 = vertices[nextIdx];
+            const M  = midpoints[i];
+            const numSamples = 10;
+            for (let j = 0; j <= numSamples; j++) {
+                const t = j / numSamples;
+                const mt = 1 - t;
+                const x = mt*mt*P0.x + 2*mt*t*M.x + t*t*P2.x;
+                const y = mt*mt*P0.y + 2*mt*t*M.y + t*t*P2.y;
+                points.push(x, y);
+            }
+        }
+        return points;
     },
 
     // Helper to update drag surface
