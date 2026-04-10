@@ -38,6 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
         RightPanelManager.autoPackTextures(stageRight, false);
     });
 
+    document.getElementById('autoPackLeft').addEventListener('click', () => {
+        if (window.leftPanel) window.leftPanel.autoPackImages();
+    });
+
     // Save/Load project functions
     window.saveProject = () => SaveManager.save(stageLeft, stageRight);
     window.loadProject = () => SaveManager.load(stageLeft, stageRight);

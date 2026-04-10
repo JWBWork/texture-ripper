@@ -517,30 +517,23 @@ const LeftPanelManager = {
         PanZoomManager.initPanning(stage);
         PanZoomManager.initZooming(stage);
 
-        // Save/Load API
         window.leftPanel = {
             getState: () => {
                 const images = bgImages.map(img => ({
                     dataURL: SaveManager.imageToDataURL(img),
-                    x: img.x(),
-                    y: img.y(),
-                    width: img.width(),
-                    height: img.height(),
-                    scaleX: img.scaleX(),
-                    scaleY: img.scaleY(),
+                    x: img.x(), y: img.y(),
+                    width: img.width(), height: img.height(),
+                    scaleX: img.scaleX(), scaleY: img.scaleY(),
                     rotation: img.rotation()
                 }));
 
                 const polygons = [];
                 polygonLayer.find('.group').forEach(group => {
-                    const verts = group.vertices.map(v => ({ x: v.x, y: v.y }));
-                    const mids = group.midpoints.map(m => ({ x: m.x, y: m.y, locked: m.locked }));
                     polygons.push({
                         id: group._id,
-                        x: group.x(),
-                        y: group.y(),
-                        vertices: verts,
-                        midpoints: mids
+                        x: group.x(), y: group.y(),
+                        vertices: group.vertices.map(v => ({ x: v.x, y: v.y })),
+                        midpoints: group.midpoints.map(m => ({ x: m.x, y: m.y, locked: m.locked }))
                     });
                 });
 
@@ -548,26 +541,21 @@ const LeftPanelManager = {
             },
 
             loadState: (state) => {
-                // Clear existing
                 bgImages.forEach(img => img.destroy());
                 bgImages.length = 0;
                 polygonLayer.find('.group').forEach(g => g.destroy());
                 bgLayer.batchDraw();
                 polygonLayer.batchDraw();
 
-                // Restore images
                 if (state.images) {
                     state.images.forEach(imgData => {
                         const img = new Image();
                         img.onload = () => {
                             const konvaImg = new Konva.Image({
-                                x: imgData.x,
-                                y: imgData.y,
+                                x: imgData.x, y: imgData.y,
                                 image: img,
-                                width: imgData.width,
-                                height: imgData.height,
-                                scaleX: imgData.scaleX || 1,
-                                scaleY: imgData.scaleY || 1,
+                                width: imgData.width, height: imgData.height,
+                                scaleX: imgData.scaleX || 1, scaleY: imgData.scaleY || 1,
                                 rotation: imgData.rotation || 0,
                                 draggable: !imagesLocked
                             });
@@ -579,15 +567,12 @@ const LeftPanelManager = {
                     });
                 }
 
-                // Restore polygons
                 if (state.polygons) {
                     state.polygons.forEach(polyData => {
                         const group = PolygonManager.createPolygonGroup(
                             stage, polygonLayer, polyData.vertices, dirtyPolygons, true
                         );
                         group.position({ x: polyData.x || 0, y: polyData.y || 0 });
-
-                        // Restore midpoints
                         if (polyData.midpoints) {
                             polyData.midpoints.forEach((m, i) => {
                                 if (group.midpoints[i]) {
@@ -596,26 +581,57 @@ const LeftPanelManager = {
                                     group.midpoints[i].locked = m.locked || false;
                                 }
                             });
-                            // Update visual midpoint positions
                             group.find('.midpoint').forEach((mp, i) => {
-                                if (group.midpoints[i]) {
-                                    mp.position({ x: group.midpoints[i].x, y: group.midpoints[i].y });
-                                }
+                                if (group.midpoints[i]) mp.position({ x: group.midpoints[i].x, y: group.midpoints[i].y });
                             });
-                            // Redraw polygon and grid with restored midpoints
                             PolygonManager.drawCurvedPolygon(group, group.vertices, group.midpoints);
                             GridManager.drawGrid(group, group.vertices, group.midpoints);
-                            const updatedPoints = PolygonManager.computeDragSurfacePoints(group.vertices, group.midpoints);
-                            PolygonManager.updateDragSurface(group, updatedPoints);
+                            const pts = PolygonManager.computeDragSurfacePoints(group.vertices, group.midpoints);
+                            PolygonManager.updateDragSurface(group, pts);
                         }
-
-                        // Reassign ID if saved
                         if (polyData.id) group._id = polyData.id;
-
                         dirtyPolygons.add(group._id);
                     });
                     polygonLayer.batchDraw();
                 }
+            },
+
+            autoPackImages: () => {
+                if (bgImages.length === 0) return;
+
+                const padding = 10;
+                const getDims = (img) => ({
+                    width: img.width() * Math.abs(img.scaleX()),
+                    height: img.height() * Math.abs(img.scaleY())
+                });
+
+                const sorted = [...bgImages].sort((a, b) => getDims(b).height - getDims(a).height);
+
+                let totalArea = 0;
+                sorted.forEach(img => { const d = getDims(img); totalArea += d.width * d.height; });
+                const targetRowWidth = Math.max(stage.width(), Math.sqrt(totalArea) * 1.4);
+
+                let cursorX = 0, cursorY = 0, rowHeight = 0;
+                sorted.forEach(img => {
+                    const { width, height } = getDims(img);
+                    if (cursorX > 0 && cursorX + width > targetRowWidth) {
+                        cursorX = 0; cursorY += rowHeight + padding; rowHeight = 0;
+                    }
+                    img.position({ x: cursorX, y: cursorY });
+                    cursorX += width + padding;
+                    rowHeight = Math.max(rowHeight, height);
+                });
+
+                tr.nodes([]);
+                const scale = Math.min(
+                    stage.width() / (targetRowWidth + padding * 2),
+                    stage.height() / (cursorY + rowHeight + padding * 2),
+                    1
+                );
+                stage.scale({ x: scale, y: scale });
+                stage.position({ x: padding * scale, y: padding * scale });
+                bgLayer.batchDraw();
+                FeedbackManager.show('Arranged ' + bgImages.length + ' image(s)');
             }
         };
 
