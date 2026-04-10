@@ -398,7 +398,7 @@ const LeftPanelManager = {
                 function loadPolygons() {
                     data.polygons.forEach(polyData => {
                         const group = PolygonManager.createPolygonGroup(
-                            stage, polygonLayer, polyData.vertices, dirtyPolygons
+                            stage, polygonLayer, polyData.vertices, dirtyPolygons, true
                         );
 
                         // Fix ID mapping: remove auto-generated, set saved

@@ -1,21 +1,22 @@
 // ==================== POLYGON MANAGEMENT ====================
 const PolygonManager = {
     // Unified polygon creation function
-    createPolygonGroup: (stage, layer, points = null, dirtyPolygons = null) => {
-        const group = new Konva.Group({ 
-            draggable: true, 
+    createPolygonGroup: (stage, layer, points = null, dirtyPolygons = null, skipReorder = false) => {
+        const group = new Konva.Group({
+            draggable: true,
             name: 'group',
             _id: Utils.generateId()
         });
 
         if (group && group._id)
             dirtyPolygons.add(group._id);
-        
+
         // Get vertices - either from provided points or create default rectangle
         let vertices;
         if (points && points.length === 4) {
             // REORDER vertices to ensure consistent order for both polygon types
-            vertices = Utils.reorderPolygonVertices(points);
+            // Skip reorder when loading saved state (vertices already in correct order)
+            vertices = skipReorder ? points.map(p => ({ x: p.x, y: p.y })) : Utils.reorderPolygonVertices(points);
         } else {
             // Create default rectangle centered on stage
             const stageCenterX = stage.width() / 2;
