@@ -15,7 +15,7 @@ const PolygonManager = {
         let vertices;
         if (points && points.length === 4) {
             // REORDER vertices to ensure consistent order for both polygon types
-            // Skip reorder when restoring from undo (vertices already in correct order)
+            // Skip reorder when loading saved state (vertices already in correct order)
             vertices = skipReorder ? points.map(p => ({ x: p.x, y: p.y })) : Utils.reorderPolygonVertices(points);
         } else {
             // Create default rectangle centered on stage

@@ -27,3 +27,4 @@ Thumbs.db
 
 # MacOS files
 *.app
+.claude/
