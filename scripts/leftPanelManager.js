@@ -25,6 +25,27 @@ const LeftPanelManager = {
         let drawingMode = false;
         let drawingModeHandlers = null;
 
+        let linkRectsToImages = false;
+
+        document.getElementById('linkRectsToImages').addEventListener('change', (e) => {
+            linkRectsToImages = e.target.checked;
+        });
+
+        function getOverlappingGroups(konvaImg) {
+            const imgBox = konvaImg.getClientRect();
+            const groups = [];
+            polygonLayer.find('.group').forEach(group => {
+                const groupBox = group.getClientRect();
+                if (imgBox.x + imgBox.width > groupBox.x &&
+                    imgBox.x < groupBox.x + groupBox.width &&
+                    imgBox.y + imgBox.height > groupBox.y &&
+                    imgBox.y < groupBox.y + groupBox.height) {
+                    groups.push(group);
+                }
+            });
+            return groups;
+        }
+
         // Helper to create a background image with undo support
         function addBackgroundImage(img) {
             const scale = Math.min(stage.width() / img.width, stage.height() / img.height);
@@ -41,7 +62,6 @@ const LeftPanelManager = {
             bgImages.push(konvaImg);
             bgLayer.batchDraw();
 
-            // Undo for image add
             UndoManager.push({
                 undo: () => {
                     konvaImg.remove();
@@ -394,23 +414,67 @@ const LeftPanelManager = {
         });
         uiLayer.add(tr);
 
-        // Image drag undo (stage-level events)
+        // Image drag — linked rects + undo (stage-level events)
         let imgDragStartPos = null;
+        let imgDragLastPos = null;
+        let imgLinkedGroups = [];
+        let imgLinkedGroupStartPositions = [];
 
         stage.on('dragstart', (e) => {
             if (!(e.target instanceof Konva.Image)) return;
-            imgDragStartPos = { x: e.target.x(), y: e.target.y() };
+            const img = e.target;
+            imgDragStartPos = { x: img.x(), y: img.y() };
+            imgDragLastPos = { x: img.x(), y: img.y() };
+            if (linkRectsToImages) {
+                imgLinkedGroups = getOverlappingGroups(img);
+                imgLinkedGroupStartPositions = imgLinkedGroups.map(g => ({
+                    group: g, x: g.x(), y: g.y()
+                }));
+            } else {
+                imgLinkedGroups = [];
+                imgLinkedGroupStartPositions = [];
+            }
         });
+
+        stage.on('dragmove', (e) => {
+            if (!(e.target instanceof Konva.Image)) return;
+            if (!linkRectsToImages || imgLinkedGroups.length === 0 || !imgDragLastPos) return;
+            const img = e.target;
+            const dx = img.x() - imgDragLastPos.x;
+            const dy = img.y() - imgDragLastPos.y;
+            imgLinkedGroups.forEach(group => {
+                group.x(group.x() + dx);
+                group.y(group.y() + dy);
+            });
+            imgDragLastPos = { x: img.x(), y: img.y() };
+            polygonLayer.batchDraw();
+        });
+
         stage.on('dragend', (e) => {
             if (!(e.target instanceof Konva.Image) || !imgDragStartPos) return;
             const img = e.target;
             const start = { ...imgDragStartPos };
             const end = { x: img.x(), y: img.y() };
+            const groupsBefore = imgLinkedGroupStartPositions.map(s => ({ ...s }));
+            const groupsAfter = imgLinkedGroups.map(g => ({ group: g, x: g.x(), y: g.y() }));
             imgDragStartPos = null;
+            imgDragLastPos = null;
+            imgLinkedGroups = [];
+            imgLinkedGroupStartPositions = [];
             if (start.x === end.x && start.y === end.y) return;
             UndoManager.push({
-                undo: () => { img.position(start); tr.forceUpdate(); stage.batchDraw(); },
-                redo: () => { img.position(end); tr.forceUpdate(); stage.batchDraw(); }
+                undo: () => {
+                    img.position(start);
+                    groupsBefore.forEach(s => s.group.position({ x: s.x, y: s.y }));
+                    tr.forceUpdate();
+                    stage.batchDraw();
+                },
+                redo: () => {
+                    img.position(end);
+                    groupsAfter.forEach(s => s.group.position({ x: s.x, y: s.y }));
+                    tr.forceUpdate();
+                    stage.batchDraw();
+                }
             });
         });
 
