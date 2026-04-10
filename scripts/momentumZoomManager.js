@@ -20,7 +20,6 @@ const MomentumZoom = {
      */
     initMomentumZoom: (stage) => {
         const container = stage.container();
-        let wasTrackpadPan = false;
 
         stage.on('wheel', (e) => {
             e.evt.preventDefault();
@@ -32,23 +31,22 @@ const MomentumZoom = {
             // Trackpad: many small events in quick succession (< 50ms apart)
             // Mouse wheel: larger deltaY, less frequent
             const deltaY = Math.abs(e.evt.deltaY);
+            const deltaX = Math.abs(e.evt.deltaX || 0);
             const isTrackpad = deltaY < 100 && timeSinceLastWheel < 50;
 
-            // On macOS: if deltaY hasn't changed much and it's rapid, it's likely trackpad pan
-            const isDeltaConsistent = Math.abs(e.evt.deltaY - MomentumZoom.lastDeltaY) < 30;
-            const isLikelyTrackpadPan = isTrackpad && isDeltaConsistent && deltaY < 40;
+            // macOS trackpad two-finger pan: has significant deltaX (horizontal movement)
+            // This distinguishes pan from vertical scroll
+            const hasHorizontalMovement = deltaX > 0;
+            const isLikelyTrackpadPan = isTrackpad && hasHorizontalMovement && !e.evt.ctrlKey;
 
             MomentumZoom.lastDeltaY = e.evt.deltaY;
             MomentumZoom.lastWheelTime = now;
 
             // Handle trackpad two-finger panning (macOS)
-            if (isLikelyTrackpadPan && !e.evt.ctrlKey) {
+            if (isLikelyTrackpadPan) {
                 MomentumZoom.handleTrackpadPan(stage, e);
-                wasTrackpadPan = true;
                 return;
             }
-
-            wasTrackpadPan = false;
 
             // Handle zoom (mouse wheel or pinch gesture)
             // Calculate velocity for momentum
