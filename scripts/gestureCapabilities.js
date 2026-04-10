@@ -60,9 +60,10 @@ const TrackpadInitializer = {
     initAll: (stage) => {
         const capabilities = GestureCapabilities.detect();
 
-        // Always initialize basic panning and zooming
+        // Initialize basic panning (middle-click)
         PanZoomManager.initPanning(stage);
-        PanZoomManager.initZooming(stage);
+        // Note: initZooming is NOT called here — MomentumZoom handles all
+        // wheel/zoom events to avoid double-zooming
 
         // Add multi-touch pan and pinch zoom (works on most platforms)
         if (capabilities.supportsPointerEvent && capabilities.maxTouchPoints > 0) {

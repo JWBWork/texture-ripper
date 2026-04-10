@@ -83,6 +83,9 @@ const PanZoomManager = {
             // Stop default scrolling
             e.evt.preventDefault();
 
+            // Shift + scroll = pan (handled by MomentumZoom), skip zoom
+            if (e.evt.shiftKey) return;
+
             const oldScale = stage.scaleX();
             const pointer = stage.getPointerPosition();
 
