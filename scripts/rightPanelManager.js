@@ -412,9 +412,8 @@ const RightPanelManager = {
             };
         }
 
-        // Initialize panning and zooming
-        PanZoomManager.initPanning(stage);
-        PanZoomManager.initZooming(stage);
+        // Initialize panning, zooming, and trackpad gestures
+        PanZoomManager.initAll(stage);
 
         // API for updating textures
         window.rightPanel = {

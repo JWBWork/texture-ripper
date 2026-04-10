@@ -108,8 +108,16 @@ const PanZoomManager = {
                 x: pointer.x - mousePointTo.x * newScale,
                 y: pointer.y - mousePointTo.y * newScale,
             };
-            
+
             stage.position(newPos);
         });
+    },
+
+    /**
+     * Initialize all pan/zoom gestures with trackpad support
+     * Calls individual initializers and platform-specific handlers
+     */
+    initAll: (stage) => {
+        TrackpadInitializer.initAll(stage);
     }
 };

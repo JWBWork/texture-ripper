@@ -577,9 +577,8 @@ const LeftPanelManager = {
             if (e.key === 'Shift') tr.keepRatio(false);
         });
 
-        // Initialize panning and zooming
-        PanZoomManager.initPanning(stage);
-        PanZoomManager.initZooming(stage);
+        // Initialize panning, zooming, and trackpad gestures
+        PanZoomManager.initAll(stage);
 
         window.leftPanel = {
             getState: () => {
