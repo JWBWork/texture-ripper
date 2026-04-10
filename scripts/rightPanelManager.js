@@ -518,14 +518,17 @@ const RightPanelManager = {
                     delete tiedRects[id];
                 });
                 imageLayer.batchDraw();
+
+
                 if (state.textures) {
-                    state.textures.forEach(texData => {
+                    state.textures.forEach((texData, i) => {
                         const img = new Image();
                         img.onload = () => {
                             const konvaImg = new Konva.Image({
                                 x: texData.x, y: texData.y,
                                 image: img,
-                                width: texData.width, height: texData.height,
+                                width: texData.width || img.naturalWidth,
+                                height: texData.height || img.naturalHeight,
                                 scaleX: texData.scaleX || 1, scaleY: texData.scaleY || 1,
                                 rotation: texData.rotation || 0,
                                 id: `rect_${texData.groupId}`,
@@ -536,6 +539,9 @@ const RightPanelManager = {
                             imageLayer.add(konvaImg);
                             tiedRects[texData.groupId] = konvaImg;
                             imageLayer.batchDraw();
+                        };
+                        img.onerror = (err) => {
+                            console.error(`Texture ${i} failed to load:`, err);
                         };
                         img.src = texData.dataURL;
                     });
