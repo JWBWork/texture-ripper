@@ -32,29 +32,92 @@ const LeftPanelManager = {
         });
 
         function getOverlappingGroups(konvaImg) {
-            const imgBox = konvaImg.getClientRect();
+            // Use stage coordinates (not screen/clientRect) for correct results at any zoom
+            const iX = konvaImg.x(), iY = konvaImg.y();
+            const iW = konvaImg.width() * konvaImg.scaleX();
+            const iH = konvaImg.height() * konvaImg.scaleY();
             const groups = [];
             polygonLayer.find('.group').forEach(group => {
-                const groupBox = group.getClientRect();
-                if (imgBox.x + imgBox.width > groupBox.x &&
-                    imgBox.x < groupBox.x + groupBox.width &&
-                    imgBox.y + imgBox.height > groupBox.y &&
-                    imgBox.y < groupBox.y + groupBox.height) {
+                const verts = group.vertices;
+                if (!verts) return;
+                const gx = group.x(), gy = group.y();
+                let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+                for (const v of verts) {
+                    gMinX = Math.min(gMinX, v.x + gx);
+                    gMinY = Math.min(gMinY, v.y + gy);
+                    gMaxX = Math.max(gMaxX, v.x + gx);
+                    gMaxY = Math.max(gMaxY, v.y + gy);
+                }
+                if (gMaxX > iX && gMinX < iX + iW &&
+                    gMaxY > iY && gMinY < iY + iH) {
                     groups.push(group);
                 }
             });
             return groups;
         }
 
+        // Find a position for a new image that doesn't overlap existing ones
+        function findUnoccupiedPosition(w, h) {
+            if (bgImages.length === 0) {
+                // First image — center on visible area
+                return {
+                    x: (stage.width() / 2 - stage.x()) / stage.scaleX() - w / 2,
+                    y: (stage.height() / 2 - stage.y()) / stage.scaleY() - h / 2
+                };
+            }
+
+            // Collect existing image rects in stage coordinates
+            const rects = bgImages.map(img => ({
+                x: img.x(), y: img.y(),
+                w: img.width() * img.scaleX(),
+                h: img.height() * img.scaleY()
+            }));
+
+            const gap = 20;
+
+            function overlaps(x, y) {
+                for (const r of rects) {
+                    if (x + w + gap > r.x && x < r.x + r.w + gap &&
+                        y + h + gap > r.y && y < r.y + r.h + gap) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Try placing to the right of each existing image, then below
+            for (const r of rects) {
+                const candidates = [
+                    { x: r.x + r.w + gap, y: r.y },       // right
+                    { x: r.x, y: r.y + r.h + gap },       // below
+                    { x: r.x - w - gap, y: r.y },          // left
+                    { x: r.x, y: r.y - h - gap },          // above
+                ];
+                for (const c of candidates) {
+                    if (!overlaps(c.x, c.y)) return c;
+                }
+            }
+
+            // Fallback: place below the bottommost image
+            let maxBottom = -Infinity;
+            for (const r of rects) {
+                maxBottom = Math.max(maxBottom, r.y + r.h);
+            }
+            return { x: rects[0].x, y: maxBottom + gap };
+        }
+
         // Helper to create a background image with undo support
         function addBackgroundImage(img) {
             const scale = Math.min(stage.width() / img.width, stage.height() / img.height);
+            const scaledW = img.width * scale;
+            const scaledH = img.height * scale;
+            const pos = findUnoccupiedPosition(scaledW, scaledH);
             const konvaImg = new Konva.Image({
-                x: (stage.width() - img.width * scale) / 2,
-                y: (stage.height() - img.height * scale) / 2,
+                x: pos.x,
+                y: pos.y,
                 image: img,
-                width: img.width * scale,
-                height: img.height * scale,
+                width: scaledW,
+                height: scaledH,
                 draggable: !imagesLocked
             });
 
@@ -580,6 +643,63 @@ const LeftPanelManager = {
         // Initialize panning, zooming, and trackpad gestures
         PanZoomManager.initAll(stage);
 
+        // Scale polygon UI elements inversely with zoom so they stay visible
+        function updatePolygonScaling() {
+            const zoom = stage.scaleX();
+            const inv = 1 / zoom;
+
+            polygonLayer.find('.group').forEach(group => {
+                // Vertices (squares)
+                group.find('.vertex').forEach(v => {
+                    const r = CONFIG.VERTEX.RADIUS * inv;
+                    v.width(r * 2);
+                    v.height(r * 2);
+                    v.offsetX(r);
+                    v.offsetY(r);
+                    v.strokeWidth(CONFIG.VERTEX.STROKE_WIDTH * inv);
+                });
+
+                // Vertex labels
+                group.find('.vertex-label').forEach(l => {
+                    l.fontSize(7 * inv);
+                    l.offsetY(10 * inv);
+                    l.offsetX(CONFIG.VERTEX.RADIUS * inv);
+                });
+
+                // Midpoints (circles)
+                group.find('.midpoint').forEach(m => {
+                    m.radius(CONFIG.MIDPOINT.RADIUS * inv);
+                    m.strokeWidth(CONFIG.MIDPOINT.STROKE_WIDTH * inv);
+                });
+
+                // Edge handles (diamonds)
+                group.find('.reference').forEach(r => {
+                    const rad = CONFIG.MIDPOINT.REFERENCE.RADIUS * inv;
+                    r.width(rad * 2);
+                    r.height(rad * 2);
+                    r.offsetX(rad);
+                    r.offsetY(rad);
+                    r.strokeWidth(CONFIG.MIDPOINT.REFERENCE.STROKE_WIDTH * inv);
+                });
+
+                // Polygon edges
+                group.find('.polygon').forEach(p => {
+                    p.strokeWidth(CONFIG.POLYGON.STROKE_WIDTH * inv);
+                    p.dash([5 * inv, 5 * inv]);
+                });
+            });
+
+            // Grid lines
+            polygonLayer.find('.grid').forEach(l => {
+                l.strokeWidth(CONFIG.GRID.STROKE_WIDTH * inv);
+                l.dash([5 * inv, 5 * inv]);
+            });
+
+            polygonLayer.batchDraw();
+        }
+
+        stage.on('scaleXChange', updatePolygonScaling);
+
         window.leftPanel = {
             getState: () => {
                 const images = bgImages.map(img => ({
@@ -662,6 +782,31 @@ const LeftPanelManager = {
             autoPackImages: () => {
                 if (bgImages.length === 0) return;
 
+                // Snapshot before state for undo
+                const beforeImgPositions = bgImages.map(img => ({ img, x: img.x(), y: img.y() }));
+                const beforeGroupPositions = [];
+                const beforeStage = { scale: stage.scaleX(), x: stage.x(), y: stage.y() };
+
+                // If linked rects, snapshot group positions and find associations
+                const linkedGroupMoves = [];
+                if (linkRectsToImages) {
+                    bgImages.forEach((img, imgIdx) => {
+                        const groups = getOverlappingGroups(img);
+                        console.log(
+                            `[autopack] img ${imgIdx}: pos=(${img.x().toFixed(0)}, ${img.y().toFixed(0)}),` +
+                            ` size=${(img.width() * img.scaleX()).toFixed(0)}x${(img.height() * img.scaleY()).toFixed(0)},` +
+                            ` linked groups: ${groups.length > 0 ? groups.map(g => g._id).join(', ') : 'none'}`
+                        );
+                        groups.forEach(group => {
+                            linkedGroupMoves.push({
+                                group, img,
+                                beforeX: group.x(), beforeY: group.y()
+                            });
+                        });
+                    });
+                    console.log(`[autopack] total linked moves: ${linkedGroupMoves.length}`);
+                }
+
                 const padding = 10;
                 const getDims = (img) => ({
                     width: img.width() * Math.abs(img.scaleX()),
@@ -680,10 +825,31 @@ const LeftPanelManager = {
                     if (cursorX > 0 && cursorX + width > targetRowWidth) {
                         cursorX = 0; cursorY += rowHeight + padding; rowHeight = 0;
                     }
+                    const oldX = img.x(), oldY = img.y();
                     img.position({ x: cursorX, y: cursorY });
+                    const dx = cursorX - oldX, dy = cursorY - oldY;
+
+                    // Move linked rects with their image
+                    if (linkRectsToImages) {
+                        linkedGroupMoves.forEach(entry => {
+                            if (entry.img === img) {
+                                entry.group.x(entry.group.x() + dx);
+                                entry.group.y(entry.group.y() + dy);
+                            }
+                        });
+                    }
+
                     cursorX += width + padding;
                     rowHeight = Math.max(rowHeight, height);
                 });
+
+                // Snapshot after state for linked groups
+                if (linkRectsToImages) {
+                    linkedGroupMoves.forEach(entry => {
+                        entry.afterX = entry.group.x();
+                        entry.afterY = entry.group.y();
+                    });
+                }
 
                 tr.nodes([]);
                 const scale = Math.min(
@@ -693,7 +859,34 @@ const LeftPanelManager = {
                 );
                 stage.scale({ x: scale, y: scale });
                 stage.position({ x: padding * scale, y: padding * scale });
+
+                const afterStage = { scale: stage.scaleX(), x: stage.x(), y: stage.y() };
+                const afterImgPositions = bgImages.map(img => ({ img, x: img.x(), y: img.y() }));
+
+                // Push undo
+                UndoManager.push({
+                    undo: () => {
+                        beforeImgPositions.forEach(s => s.img.position({ x: s.x, y: s.y }));
+                        linkedGroupMoves.forEach(s => s.group.position({ x: s.beforeX, y: s.beforeY }));
+                        stage.scale({ x: beforeStage.scale, y: beforeStage.scale });
+                        stage.position({ x: beforeStage.x, y: beforeStage.y });
+                        tr.nodes([]);
+                        bgLayer.batchDraw();
+                        polygonLayer.batchDraw();
+                    },
+                    redo: () => {
+                        afterImgPositions.forEach(s => s.img.position({ x: s.x, y: s.y }));
+                        linkedGroupMoves.forEach(s => s.group.position({ x: s.afterX, y: s.afterY }));
+                        stage.scale({ x: afterStage.scale, y: afterStage.scale });
+                        stage.position({ x: afterStage.x, y: afterStage.y });
+                        tr.nodes([]);
+                        bgLayer.batchDraw();
+                        polygonLayer.batchDraw();
+                    }
+                });
+
                 bgLayer.batchDraw();
+                polygonLayer.batchDraw();
                 FeedbackManager.show('Arranged ' + bgImages.length + ' image(s)');
             }
         };

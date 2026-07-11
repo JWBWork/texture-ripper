@@ -21,8 +21,9 @@ const CONFIG = {
         REFERENCE: {
             RADIUS: 4,
             FILL: null,
-            STROKE: 'blue',
-            STROKE_WIDTH: 1
+            STROKE: 'rgba(59,130,246,1)',
+            STROKE_WIDTH: 1,
+            RESPONSIVE_RADIUS: 10
         }
     },
     POLYGON: {

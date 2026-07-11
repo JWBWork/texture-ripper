@@ -1,5 +1,22 @@
 // ==================== POLYGON MANAGEMENT ====================
 const PolygonManager = {
+    EDGE_HANDLE_OFFSET: 15,
+
+    // Compute outward-perpendicular offset position for an edge handle
+    edgeHandlePos: (v1, v2, verts) => {
+        const mx = (v1.x + v2.x) / 2;
+        const my = (v1.y + v2.y) / 2;
+        const dx = v2.x - v1.x;
+        const dy = v2.y - v1.y;
+        const len = Math.hypot(dx, dy) || 1;
+        let nx = -dy / len;
+        let ny = dx / len;
+        const cx = verts.reduce((s, v) => s + v.x, 0) / verts.length;
+        const cy = verts.reduce((s, v) => s + v.y, 0) / verts.length;
+        if ((cx - mx) * nx + (cy - my) * ny > 0) { nx = -nx; ny = -ny; }
+        return { x: mx + nx * PolygonManager.EDGE_HANDLE_OFFSET, y: my + ny * PolygonManager.EDGE_HANDLE_OFFSET };
+    },
+
     // Unified polygon creation function
     createPolygonGroup: (stage, layer, points = null, dirtyPolygons = null, skipReorder = false) => {
         const group = new Konva.Group({
@@ -197,14 +214,12 @@ const PolygonManager = {
                 const updatedPoints = PolygonManager.computeDragSurfacePoints(vertices, midpoints);
                 PolygonManager.updateDragSurface(group, updatedPoints);
 
-                // Update reference circles
+                // Update edge handle positions
                 group.referencePoints.forEach((ref, idx) => {
                     const v1 = vertices[idx];
                     const v2 = vertices[(idx + 1) % vertices.length];
-                    ref.position({
-                        x: (v1.x + v2.x) / 2,
-                        y: (v1.y + v2.y) / 2
-                    });
+                    const p = PolygonManager.edgeHandlePos(v1, v2, vertices);
+                    ref.position(p);
                 });
             });
 
@@ -217,22 +232,127 @@ const PolygonManager = {
             group.add(label);
         });
 
-        // Add reference midpoints (non-interactable, bigger marker)
+        // Add edge handles (draggable - moves both vertices of that edge)
         const referencePoints = [];
         vertices.forEach((point, i) => {
             const nextIdx = (i + 1) % vertices.length;
-            const refX = (vertices[i].x + vertices[nextIdx].x) / 2;
-            const refY = (vertices[i].y + vertices[nextIdx].y) / 2;
+            const pos = PolygonManager.edgeHandlePos(vertices[i], vertices[nextIdx], vertices);
 
-            const reference = new Konva.Circle({
-                x: refX,
-                y: refY,
-                radius: CONFIG.MIDPOINT.REFERENCE.RADIUS, // bigger than midpoint
+            const reference = new Konva.Rect({
+                x: pos.x,
+                y: pos.y,
+                offsetX: CONFIG.MIDPOINT.REFERENCE.RADIUS,
+                offsetY: CONFIG.MIDPOINT.REFERENCE.RADIUS,
+                width: CONFIG.MIDPOINT.REFERENCE.RADIUS * 2,
+                height: CONFIG.MIDPOINT.REFERENCE.RADIUS * 2,
                 fill: CONFIG.MIDPOINT.REFERENCE.FILL,
                 stroke: CONFIG.MIDPOINT.REFERENCE.STROKE,
                 strokeWidth: CONFIG.MIDPOINT.REFERENCE.STROKE_WIDTH,
+                rotation: 45,
                 name: 'reference',
-                listening: false  // makes it non-interactable
+                draggable: true,
+                hitFunc: function(context) {
+                    const r = CONFIG.MIDPOINT.REFERENCE.RADIUS + (CONFIG.MIDPOINT.REFERENCE.RESPONSIVE_RADIUS || 10);
+                    context.beginPath();
+                    context.rect(-r, -r, r * 2, r * 2);
+                    context.closePath();
+                    context.fillStrokeShape(this);
+                }
+            });
+
+            // Edge handle drag undo
+            let edgeDragStartState = null;
+            reference.on('dragstart', () => {
+                edgeDragStartState = PolygonManager.snapshotPolygonState(group);
+            });
+            reference.on('dragend', () => {
+                if (!edgeDragStartState) return;
+                const before = edgeDragStartState;
+                const after = PolygonManager.snapshotPolygonState(group);
+                edgeDragStartState = null;
+                UndoManager.push({
+                    undo: () => {
+                        PolygonManager.restorePolygonState(group, before);
+                        if (dirtyPolygons && group._id) dirtyPolygons.add(group._id);
+                    },
+                    redo: () => {
+                        PolygonManager.restorePolygonState(group, after);
+                        if (dirtyPolygons && group._id) dirtyPolygons.add(group._id);
+                    }
+                });
+            });
+
+            reference.on('dragmove', () => {
+                const v1Idx = i;
+                const v2Idx = nextIdx;
+
+                // The handle sits at edge midpoint + offset. Compute where
+                // the offset position *was* before this drag tick, then get the delta.
+                const oldPos = PolygonManager.edgeHandlePos(vertices[v1Idx], vertices[v2Idx], vertices);
+                const dx = reference.x() - oldPos.x;
+                const dy = reference.y() - oldPos.y;
+
+                // Move both vertices by the same delta
+                vertices[v1Idx].x += dx;
+                vertices[v1Idx].y += dy;
+                vertices[v2Idx].x += dx;
+                vertices[v2Idx].y += dy;
+
+                if (group && group._id) dirtyPolygons.add(group._id);
+
+                // Update vertex visuals and labels
+                group.find('.vertex').forEach((v, idx) => {
+                    v.position({ x: vertices[idx].x, y: vertices[idx].y });
+                });
+                group.find('.vertex-label').forEach((l, idx) => {
+                    l.position({ x: vertices[idx].x, y: vertices[idx].y });
+                });
+
+                // Update midpoints
+                // Edge m connects vertex m to vertex (m+1)
+                // The dragged edge is edge i (v1Idx to v2Idx)
+                // Adjacent edges share one moved vertex
+                for (let m = 0; m < midpoints.length; m++) {
+                    const mStart = m;
+                    const mEnd = (m + 1) % vertices.length;
+                    const startMoved = (mStart === v1Idx || mStart === v2Idx);
+                    const endMoved = (mEnd === v1Idx || mEnd === v2Idx);
+
+                    if (startMoved && endMoved) {
+                        // Both vertices moved (this is the dragged edge) — shift midpoint by full delta
+                        midpoints[m].x += dx;
+                        midpoints[m].y += dy;
+                    } else if (!midpoints[m].locked && (startMoved || endMoved)) {
+                        // One vertex moved, unlocked — recenter
+                        midpoints[m].x = (vertices[mStart].x + vertices[mEnd].x) / 2;
+                        midpoints[m].y = (vertices[mStart].y + vertices[mEnd].y) / 2;
+                    }
+                    // Locked midpoints on adjacent edges stay put (user positioned them intentionally)
+                }
+
+                // Update midpoint visuals
+                group.find('.midpoint').forEach((mp, idx) => {
+                    mp.position({ x: midpoints[idx].x, y: midpoints[idx].y });
+                });
+
+                // Update all edge handle positions (with outward offset)
+                referencePoints.forEach((ref, idx) => {
+                    const rv1 = vertices[idx];
+                    const rv2 = vertices[(idx + 1) % vertices.length];
+                    const p = PolygonManager.edgeHandlePos(rv1, rv2, vertices);
+                    ref.position(p);
+                });
+
+                // Update polygon and grid
+                PolygonManager.drawCurvedPolygon(group, vertices, midpoints);
+                GridManager.drawGrid(group, vertices, midpoints);
+
+                const updatedPoints = PolygonManager.computeDragSurfacePoints(vertices, midpoints);
+                PolygonManager.updateDragSurface(group, updatedPoints);
+            });
+
+            reference.on('click', (e) => {
+                e.cancelBubble = true;
             });
 
             group.add(reference);
@@ -428,7 +548,7 @@ const PolygonManager = {
         group.referencePoints.forEach((ref, i) => {
             const v1 = group.vertices[i];
             const v2 = group.vertices[(i + 1) % group.vertices.length];
-            ref.position({ x: (v1.x + v2.x) / 2, y: (v1.y + v2.y) / 2 });
+            ref.position(PolygonManager.edgeHandlePos(v1, v2, group.vertices));
         });
 
         PolygonManager.drawCurvedPolygon(group, group.vertices, group.midpoints);
@@ -447,24 +567,36 @@ const PolygonManager = {
             dragSurface.points(points);
         }
 
-        // Make sure vertices and midpoints are always on top
+        // Make sure handles are always on top
+        group.find('.reference').forEach(r => r.moveToTop());
         group.find('.vertex').forEach(v => v.moveToTop());
         group.find('.midpoint').forEach(m => m.moveToTop());
     },
 
     // Get the Konva.Image objects underneath a polygon group
+    // Uses stage coordinates (not screen/clientRect) to match the extraction coordinate space
     getUnderlyingImages: (group, stage) => {
         const images = stage.find('Image');
         if (!images || images.length === 0) return [];
 
-        const groupBox = group.getClientRect();
+        // Compute group bounding box in stage coordinates from vertices
+        const verts = group.vertices;
+        const gx = group.x(), gy = group.y();
+        let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+        for (const v of verts) {
+            gMinX = Math.min(gMinX, v.x + gx);
+            gMinY = Math.min(gMinY, v.y + gy);
+            gMaxX = Math.max(gMaxX, v.x + gx);
+            gMaxY = Math.max(gMaxY, v.y + gy);
+        }
+
         const intersectingImages = images.filter(img => {
-            const imgBox = img.getClientRect();
+            const iX = img.x(), iY = img.y();
+            const iW = img.width() * img.scaleX();
+            const iH = img.height() * img.scaleY();
             return (
-                groupBox.x + groupBox.width > imgBox.x &&
-                groupBox.x < imgBox.x + imgBox.width &&
-                groupBox.y + groupBox.height > imgBox.y &&
-                groupBox.y < imgBox.y + imgBox.height
+                gMaxX > iX && gMinX < iX + iW &&
+                gMaxY > iY && gMinY < iY + iH
             );
         });
 

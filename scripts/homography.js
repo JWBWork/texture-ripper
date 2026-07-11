@@ -263,6 +263,7 @@ const ImageProcessing = {
         }
 
         outCtx.putImageData(outImageData, 0, 0);
+
         return outCanvas.toDataURL('image/png');
     }
 };
